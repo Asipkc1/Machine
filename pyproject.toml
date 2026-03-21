@@ -1,0 +1,14 @@
+[project]
+name = "machine"
+version = "0.1.0"
+description = "A Python machine learning project"
+requires-python = ">=3.12"
+dependencies = [
+    "beautifulsoup4>=4.14.3",
+    "openpyxl>=3.1.5",
+    "pandas>=3.0.1",
+    "selenium>=4.41.0",
+]
+
+[tool.uv]
+managed = true
