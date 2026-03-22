@@ -9,7 +9,9 @@ __pycache__/
 *.egg
 
 # Output files
-# Keep output tracked when needed for crawl artifacts.
+output/
+code/output/
+!output/.gitkeep
 
 # IDE
 .vscode/
