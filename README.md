@@ -10,8 +10,9 @@ Machine/
 │   ├── shared.py                  # Shared: build_driver(), industrial zone regex
 │   ├── hsctvn_feb2026_export.py   # Core: crawl listing + detail từ hsctvn.com
 │   ├── hsctvn_batch_by_page.py    # Wrapper: chạy từng trang với retry
-│   ├── mst_enrich_sample.py       # Enrich email/ngành nghề qua MST
-│   └── filter_industrial_zone.py  # Lọc lại file Excel theo khu CN
+│   ├── merge_pages.py             # Gộp các file page_NNN.xlsx thành 1 file
+│   ├── filter_industrial_zone.py  # Lọc lại file Excel theo khu CN
+│   └── mst_enrich_sample.py       # Enrich email/ngành nghề qua MST
 ├── input/
 ├── output/                        # Kết quả Excel
 ├── pyproject.toml
@@ -44,14 +45,19 @@ python code/hsctvn_batch_by_page.py --start-page 1 --end-page 50 --rps 0.2 --max
 python code/hsctvn_feb2026_export.py --start-page 1 --end-page 50
 ```
 
-### Enrich MST (sample)
+### Gộp kết quả các trang
 ```powershell
-python code/mst_enrich_sample.py --input-file output/merged.xlsx --sample-size 5
+python code/merge_pages.py
 ```
 
 ### Lọc lại theo khu CN
 ```powershell
 python code/filter_industrial_zone.py
+```
+
+### Enrich MST (sample)
+```powershell
+python code/mst_enrich_sample.py --input-file output/hsctvn_feb2026_all_pages_merged.xlsx --sample-size 5
 ```
 
 ## Thêm Package
