@@ -1,7 +1,7 @@
 [project]
 name = "machine"
 version = "0.1.0"
-description = "A Python machine learning project"
+description = "Crawl thong tin cong ty thanh lap moi tu hsctvn.com"
 requires-python = ">=3.12"
 dependencies = [
     "beautifulsoup4>=4.14.3",

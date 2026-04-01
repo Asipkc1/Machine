@@ -9,24 +9,15 @@ from pathlib import Path
 import pandas as pd
 
 from hsctvn_feb2026_export import run
+from shared import address_matches_industrial_zone
 
 
 def _keep_industrial_zone_companies(dataframe: pd.DataFrame) -> pd.DataFrame:
-    """Filter to keep only companies with 'công nghiệp' or 'cn' in address."""
+    """Filter to keep only companies in industrial zones."""
     if dataframe.empty or "Địa chỉ" not in dataframe.columns:
         return dataframe
 
-    mask = dataframe["Địa chỉ"].fillna("").str.lower().str.contains(
-        (
-            r"khu\s*c[oô]ng\s*nghi[ẹe]p|\bkcn\b|\bkhu\s*cn\b|"
-            r"c[ụu]m\s*c[oô]ng\s*nghi[ẹe]p|\bccn\b|"
-            r"khu\s*ch[ếe]\s*xu[ấa]t|\bkcx\b|"
-            r"khu\s*kinh\s*t[ếe]|\bindustrial\s*park\b|"
-            r"c[oô]ng\s*nghi[ẹe]p|cong\s*nghiep|\bcn\b"
-        ),
-        na=False,
-        regex=True,
-    )
+    mask = dataframe["Địa chỉ"].fillna("").apply(address_matches_industrial_zone)
     return dataframe[mask]
 
 

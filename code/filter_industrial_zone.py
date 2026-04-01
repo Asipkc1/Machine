@@ -1,15 +1,15 @@
 from pathlib import Path
 import pandas as pd
 
+from shared import address_matches_industrial_zone
+
 
 def keep_industrial_zone(dataframe: pd.DataFrame) -> pd.DataFrame:
-    """Filter to keep only companies with 'công nghiệp' or 'cn' in address."""
+    """Filter to keep only companies in industrial zones."""
     if dataframe.empty or "Địa chỉ" not in dataframe.columns:
         return dataframe
-    
-    mask = dataframe["Địa chỉ"].fillna("").str.lower().str.contains(
-        r"công nghiệp|cn", na=False, regex=True
-    )
+
+    mask = dataframe["Địa chỉ"].fillna("").apply(address_matches_industrial_zone)
     return dataframe[mask]
 
 

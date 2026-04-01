@@ -15,10 +15,11 @@ from urllib.request import Request, urlopen
 import pandas as pd
 from bs4 import BeautifulSoup
 from selenium import webdriver
-from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as ec
 from selenium.webdriver.support.ui import WebDriverWait
+
+from shared import USER_AGENT, build_driver, address_matches_industrial_zone
 
 BASE_LIST_URL = "https://hsctvn.com/thang-02/2026"
 PAGE_URL_TEMPLATE = "https://hsctvn.com/thang-02/2026/page-{page}"
@@ -31,11 +32,7 @@ DEFAULT_REQUESTS_PER_SECOND = 0.2
 DEFAULT_MIN_INTERVAL_SECONDS = 0.7
 
 HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/133.0.0.0 Safari/537.36"
-    ),
+    "User-Agent": USER_AGENT,
     "Accept-Language": "vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7",
 }
 
@@ -89,19 +86,6 @@ def configure_rate_limit(requests_per_second: float, min_interval_seconds: float
     )
 
 
-def build_driver() -> webdriver.Chrome:
-    """Create a headless Chrome driver for stable listing-page collection."""
-    options = Options()
-    options.add_argument("--headless=new")
-    options.add_argument("--disable-gpu")
-    options.add_argument("--disable-dev-shm-usage")
-    options.add_argument("--no-sandbox")
-    options.add_argument("--window-size=1920,1080")
-    options.add_argument("--log-level=3")
-    options.add_argument(f"user-agent={HEADERS['User-Agent']}")
-    return webdriver.Chrome(options=options)
-
-
 def safe_quit(driver: webdriver.Chrome) -> None:
     """Quit browser without surfacing secondary cleanup errors."""
     try:
@@ -145,23 +129,7 @@ def normalize_space(text: str) -> str:
     return re.sub(r"\s+", " ", text or "").strip()
 
 
-def address_matches_industrial_keywords(address: str) -> bool:
-    """Match industrial-zone hints in address text."""
-    normalized = normalize_space(address).lower()
-    if not normalized:
-        return False
-    return bool(
-        re.search(
-            (
-                r"khu\s*c[oô]ng\s*nghi[ẹe]p|\bkcn\b|\bkhu\s*cn\b|"
-                r"c[ụu]m\s*c[oô]ng\s*nghi[ẹe]p|\bccn\b|"
-                r"khu\s*ch[ếe]\s*xu[ấa]t|\bkcx\b|"
-                r"khu\s*kinh\s*t[ếe]|\bindustrial\s*park\b|"
-                r"c[oô]ng\s*nghi[ẹe]p|cong\s*nghiep|\bcn\b"
-            ),
-            normalized,
-        )
-    )
+
 
 
 def parse_total_pages(first_page_html: str) -> int:
@@ -489,7 +457,7 @@ def run(
         if not listing_address:
             prefiltered_entries.append(entry)
             continue
-        if address_matches_industrial_keywords(listing_address):
+        if address_matches_industrial_zone(listing_address):
             prefiltered_entries.append(entry)
             continue
         skipped_by_listing_filter += 1
