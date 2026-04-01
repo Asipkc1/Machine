@@ -11,8 +11,8 @@ Machine/
 │   ├── hsctvn_feb2026_export.py   # Core: crawl listing + detail từ hsctvn.com
 │   ├── hsctvn_batch_by_page.py    # Wrapper: chạy từng trang với retry
 │   ├── merge_pages.py             # Gộp các file page_NNN.xlsx thành 1 file
-│   ├── filter_industrial_zone.py  # Lọc lại file Excel theo khu CN
-│   └── mst_enrich_sample.py       # Enrich email/ngành nghề qua MST
+│   ├── mst_enrich.py              # Enrich ngành nghề + vốn điều lệ qua MST
+│   └── filter_industrial_zone.py  # Lọc lại file Excel theo khu CN
 ├── input/
 ├── output/                        # Kết quả Excel
 ├── pyproject.toml
@@ -55,9 +55,13 @@ python code/merge_pages.py
 python code/filter_industrial_zone.py
 ```
 
-### Enrich MST (sample)
+### Enrich ngành nghề + vốn điều lệ
 ```powershell
-python code/mst_enrich_sample.py --input-file output/hsctvn_feb2026_all_pages_merged.xlsx --sample-size 5
+# Chạy full (hỗ trợ resume tự động nếu bị ngắt)
+python code/mst_enrich.py
+
+# Tùy chỉnh
+python code/mst_enrich.py --input-file output/hsctvn_feb2026_all_pages_merged.xlsx --save-every 10
 ```
 
 ## Thêm Package
