@@ -2,15 +2,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import random
 import re
 import time
 from pathlib import Path
 
 import pandas as pd
 from bs4 import BeautifulSoup
-from selenium import webdriver
-from selenium.webdriver.common.by import By
-from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support.ui import WebDriverWait
 
 from shared import build_driver
@@ -33,204 +31,110 @@ def normalize_mst(value: str) -> str:
     return re.sub(r"\s+", "", str(value or "")).strip()
 
 
-def sleep_between(min_delay: float, max_delay: float) -> None:
-    import random
-    time.sleep(random.uniform(min_delay, max_delay))
+def sleep_between(lo: float, hi: float) -> None:
+    time.sleep(random.uniform(lo, hi))
 
 
-def find_first_visible(driver: webdriver.Chrome, selectors: list[str]):
-    for selector in selectors:
-        elements = driver.find_elements(By.CSS_SELECTOR, selector)
-        for el in elements:
-            try:
-                if el.is_displayed() and el.is_enabled():
-                    return el
-            except Exception:
-                continue
-    return None
+# ---------------------------------------------------------------------------
+# masothue.com – lookup via JS form.submit()
+# ---------------------------------------------------------------------------
 
-
-def load_page_source(driver: webdriver.Chrome, url: str, min_delay: float, max_delay: float) -> str:
-    driver.get(url)
-    WebDriverWait(driver, 25).until(
+def _search_masothue(driver, mst: str, min_delay: float, max_delay: float) -> None:
+    """Navigate to masothue.com detail page for *mst* using JS form submit."""
+    driver.get("https://masothue.com/")
+    WebDriverWait(driver, 20).until(
         lambda d: d.execute_script("return document.readyState") == "complete"
     )
     sleep_between(min_delay, max_delay)
-    return driver.page_source
-
-
-def search_via_input(
-    driver: webdriver.Chrome,
-    start_url: str,
-    query: str,
-    input_selectors: list[str],
-    submit_selectors: list[str],
-    min_delay: float,
-    max_delay: float,
-) -> str:
-    driver.get(start_url)
-    WebDriverWait(driver, 25).until(
+    driver.execute_script(
+        "var inp = document.querySelector('input[name=\"q\"]');"
+        "inp.value = arguments[0];"
+        "inp.closest('form').submit();",
+        mst,
+    )
+    WebDriverWait(driver, 20).until(
         lambda d: d.execute_script("return document.readyState") == "complete"
     )
     sleep_between(min_delay, max_delay)
 
-    search_input = find_first_visible(driver, input_selectors)
-    if search_input is None:
-        raise RuntimeError("search_input_not_found")
 
-    search_input.clear()
-    search_input.send_keys(query)
-    sleep_between(0.4, 0.8)
+def _parse_masothue_detail(html: str) -> dict[str, str]:
+    """Parse the masothue.com detail page for industry info."""
+    soup = BeautifulSoup(html, "html.parser")
 
-    submit_button = find_first_visible(driver, submit_selectors)
-    if submit_button is not None:
-        submit_button.click()
-    else:
-        search_input.send_keys(Keys.ENTER)
+    # --- primary industry from "Ngành nghề chính" label ---
+    industry = ""
+    for tag in soup.find_all(string=re.compile(r"Ngành\s+nghề\s+chính", re.I)):
+        parent = tag.find_parent()
+        if parent is None:
+            continue
+        next_sib = parent.find_next_sibling()
+        if next_sib:
+            industry = normalize_space(next_sib.get_text())
+            break
+        # fallback: text after the label in same parent
+        rest = normalize_space(tag).split(":", 1)
+        if len(rest) == 2 and rest[1]:
+            industry = rest[1]
+            break
 
-    WebDriverWait(driver, 25).until(
-        lambda d: d.execute_script("return document.readyState") == "complete"
-    )
-    sleep_between(min_delay, max_delay)
-    return driver.page_source
+    # If not found, try table rows
+    if not industry:
+        for td in soup.select("table.table-taxinfo td"):
+            txt = normalize_space(td.get_text())
+            if re.search(r"Ngành\s+nghề\s+chính", txt, re.I):
+                next_td = td.find_next_sibling("td")
+                if next_td:
+                    industry = normalize_space(next_td.get_text())
+                    break
 
+    # --- all registered industry codes (second table) ---
+    industry_codes: list[str] = []
+    for table in soup.select("table"):
+        headers = [normalize_space(th.get_text()) for th in table.select("th")]
+        if any("Mã" in h for h in headers) and any("Ngành" in h for h in headers):
+            for row in table.select("tr")[1:]:
+                cells = row.select("td")
+                if len(cells) >= 2:
+                    code = normalize_space(cells[0].get_text())
+                    name = normalize_space(cells[1].get_text())
+                    if code and name:
+                        industry_codes.append(f"{code} - {name}")
+            break
 
-# ---------------------------------------------------------------------------
-# Parsing
-# ---------------------------------------------------------------------------
-
-def parse_lines_by_aliases(lines: list[str], aliases: list[str]) -> str:
-    for idx, line in enumerate(lines):
-        for alias in aliases:
-            match = re.search(rf"{re.escape(alias)}\s*:?\s*(.*)$", line, flags=re.IGNORECASE)
-            if not match:
-                continue
-            value = normalize_space(match.group(1))
-            if value:
-                return value
-            if idx + 1 < len(lines):
-                next_line = normalize_space(lines[idx + 1])
-                if next_line and ":" not in next_line:
-                    return next_line
-    return ""
-
-
-def parse_detail_fields(page_html: str) -> dict[str, str]:
-    """Extract industry, charter capital, and email from a detail page."""
-    soup = BeautifulSoup(page_html, "html.parser")
-    plain_text = soup.get_text("\n", strip=True)
-    lines = [normalize_space(l) for l in plain_text.splitlines() if normalize_space(l)]
-
-    email = ""
-    email_match = re.search(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}", plain_text)
-    if email_match:
-        email = normalize_space(email_match.group(0))
-
-    industry = parse_lines_by_aliases(lines, [
-        "Ngành nghề chính",
-        "Ngành nghề kinh doanh",
-        "Ngành nghề KD chính",
-        "Ngành nghề",
-    ])
-
-    capital = parse_lines_by_aliases(lines, [
-        "Vốn điều lệ",
-        "Vốn Điều Lệ",
-        "Von dieu le",
-    ])
-
-    return {"email": email, "industry": industry, "capital": capital}
+    return {
+        "industry": industry,
+        "industry_codes": "; ".join(industry_codes),
+    }
 
 
-# ---------------------------------------------------------------------------
-# masothue.com
-# ---------------------------------------------------------------------------
-
-def _extract_masothue_detail_url(search_html: str, mst: str) -> str:
-    soup = BeautifulSoup(search_html, "html.parser")
-    mst_pat = re.escape(mst)
-    exact_re = re.compile(rf"^https://masothue\.com/{mst_pat}(?:$|[-/].*)")
-
-    for a in soup.select("a[href]"):
-        href = (a.get("href") or "").strip()
-        abs_href = href if href.startswith("http") else f"https://masothue.com{href}"
-        if exact_re.match(abs_href):
-            return abs_href
-
-    for a in soup.select("a[href]"):
-        href = (a.get("href") or "").strip()
-        abs_href = href if href.startswith("http") else f"https://masothue.com{href}"
-        if abs_href.startswith("https://masothue.com/") and mst in abs_href:
-            return abs_href
-    return ""
-
-
-def lookup_masothue(
-    driver: webdriver.Chrome, mst: str, min_delay: float, max_delay: float,
-) -> dict[str, str]:
-    search_url = "https://masothue.com/"
+def lookup_masothue(driver, mst: str, min_delay: float, max_delay: float) -> dict[str, str]:
+    empty = {"status": "error", "industry": "", "industry_codes": ""}
     try:
-        search_html = search_via_input(
-            driver=driver, start_url=search_url, query=mst,
-            input_selectors=[
-                "input[name='q']", "input[type='search']",
-                "input[placeholder*='mã số thuế']", "form input[type='text']",
-            ],
-            submit_selectors=["button[type='submit']", "input[type='submit']", "form button"],
-            min_delay=min_delay, max_delay=max_delay,
-        )
-        detail_url = _extract_masothue_detail_url(search_html, mst)
-        if not detail_url:
-            return {"status": "not_found", "email": "", "industry": "", "capital": ""}
+        _search_masothue(driver, mst, min_delay, max_delay)
 
-        detail_html = load_page_source(driver, detail_url, min_delay, max_delay)
-        fields = parse_detail_fields(detail_html)
-        fields["status"] = "ok" if any(fields.values()) else "ok_but_empty"
-        return fields
+        # After JS submit the browser either lands on the detail page directly
+        # (URL contains the MST) or a search-results page.
+        current = driver.current_url
+        if mst not in current:
+            # Try to find the detail link in search results
+            soup = BeautifulSoup(driver.page_source, "html.parser")
+            link = soup.select_one(f'a[href*="/{mst}"]')
+            if link is None:
+                return {**empty, "status": "not_found"}
+            href = link["href"]
+            url = href if href.startswith("http") else f"https://masothue.com{href}"
+            driver.get(url)
+            WebDriverWait(driver, 20).until(
+                lambda d: d.execute_script("return document.readyState") == "complete"
+            )
+            sleep_between(min_delay, max_delay)
+
+        fields = _parse_masothue_detail(driver.page_source)
+        status = "ok" if fields["industry"] or fields["industry_codes"] else "ok_but_empty"
+        return {**fields, "status": status}
     except Exception as e:
-        return {"status": f"error:{e.__class__.__name__}", "email": "", "industry": "", "capital": ""}
-
-
-# ---------------------------------------------------------------------------
-# thuvienphapluat.vn
-# ---------------------------------------------------------------------------
-
-def _extract_tvpl_detail_url(search_html: str, mst: str) -> str:
-    soup = BeautifulSoup(search_html, "html.parser")
-    pattern = re.compile(
-        rf"/ma-so-thue/[^\"\s>]*-mst-{re.escape(mst)}\.html", flags=re.IGNORECASE
-    )
-    for a in soup.select("a[href]"):
-        href = (a.get("href") or "").strip()
-        if pattern.search(href):
-            return href if href.startswith("http") else f"https://thuvienphapluat.vn{href}"
-    return ""
-
-
-def lookup_tvpl(
-    driver: webdriver.Chrome, mst: str, min_delay: float, max_delay: float,
-) -> dict[str, str]:
-    search_url = "https://thuvienphapluat.vn/ma-so-thue"
-    try:
-        search_html = search_via_input(
-            driver=driver, start_url=search_url, query=mst,
-            input_selectors=[
-                "input[name='keyword']", "input[name='q']",
-                "input[id*='keyword']", "input[type='search']", "form input[type='text']",
-            ],
-            submit_selectors=["button[type='submit']", "input[type='submit']", "form button"],
-            min_delay=min_delay, max_delay=max_delay,
-        )
-        detail_url = _extract_tvpl_detail_url(search_html, mst)
-        if not detail_url:
-            return {"status": "not_found", "email": "", "industry": "", "capital": ""}
-
-        detail_html = load_page_source(driver, detail_url, min_delay, max_delay)
-        fields = parse_detail_fields(detail_html)
-        fields["status"] = "ok" if any(fields.values()) else "ok_but_empty"
-        return fields
-    except Exception as e:
-        return {"status": f"error:{e.__class__.__name__}", "email": "", "industry": "", "capital": ""}
+        return {**empty, "status": f"error:{e.__class__.__name__}"}
 
 
 # ---------------------------------------------------------------------------
@@ -281,18 +185,9 @@ def enrich(
         try:
             for i, mst in enumerate(remaining, 1):
                 print(f"[{i}/{len(remaining)}] MST={mst}")
-
-                mt = lookup_masothue(driver, mst, min_delay, max_delay)
-                tv = lookup_tvpl(driver, mst, min_delay, max_delay)
-
-                result = {
-                    "industry": mt["industry"] or tv["industry"],
-                    "capital": mt["capital"] or tv["capital"],
-                    "email": mt["email"] or tv["email"],
-                    "masothue_status": mt["status"],
-                    "tvpl_status": tv["status"],
-                }
+                result = lookup_masothue(driver, mst, min_delay, max_delay)
                 checkpoint[mst] = result
+                print(f"  status={result['status']}  industry={result['industry'][:60]}")
 
                 if i % save_every == 0:
                     save_checkpoint(checkpoint_file, checkpoint)
@@ -308,14 +203,11 @@ def enrich(
                 pass
 
     # Map enriched data back to dataframe
-    df["Ngành nghề (enrich)"] = df["_mst_clean"].map(
+    df["Ngành nghề chính (enrich)"] = df["_mst_clean"].map(
         lambda m: checkpoint.get(m, {}).get("industry", "")
     )
-    df["Vốn điều lệ (enrich)"] = df["_mst_clean"].map(
-        lambda m: checkpoint.get(m, {}).get("capital", "")
-    )
-    df["Email (enrich)"] = df["_mst_clean"].map(
-        lambda m: checkpoint.get(m, {}).get("email", "")
+    df["Ngành nghề đăng ký (enrich)"] = df["_mst_clean"].map(
+        lambda m: checkpoint.get(m, {}).get("industry_codes", "")
     )
     df.drop(columns=["_mst_clean"], inplace=True)
 
@@ -326,7 +218,7 @@ def enrich(
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Enrich company data with industry & charter capital via MST lookup"
+        description="Enrich company data with industry info from masothue.com"
     )
     parser.add_argument("--input-file", type=str, default=str(DEFAULT_INPUT))
     parser.add_argument("--output-file", type=str, default=str(DEFAULT_OUTPUT))

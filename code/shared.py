@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
@@ -12,11 +13,12 @@ USER_AGENT = (
 )
 
 INDUSTRIAL_ZONE_PATTERN = (
-    r"khu\s*c[oô]ng\s*nghi[ẹe]p|\bkcn\b|\bkhu\s*cn\b|"
-    r"c[ụu]m\s*c[oô]ng\s*nghi[ẹe]p|\bccn\b|"
+    r"khu\s*c[oô]ng\s*nghi[ẹeệ]p|\bkcn\b|\bkhu\s*cn\b|"
+    r"c[ụu]m\s*c[oô]ng\s*nghi[ẹeệ]p|\bccn\b|"
     r"khu\s*ch[ếe]\s*xu[ấa]t|\bkcx\b|"
     r"khu\s*kinh\s*t[ếe]|\bindustrial\s*park\b|"
-    r"c[oô]ng\s*nghi[ẹe]p|cong\s*nghiep|\bcn\b"
+    r"c[oô]ng\s*nghi[ẹeệ]p|cong\s*nghiep|\bcn\b|"
+    r"khu\s*c[oô]ng\s*ngh[eệ]|\bkcnc\b"
 )
 
 
@@ -35,7 +37,10 @@ def build_driver() -> webdriver.Chrome:
 
 def address_matches_industrial_zone(address: str) -> bool:
     """Check if address text matches industrial-zone keywords."""
-    normalized = re.sub(r"\s+", " ", address or "").strip().lower()
+    # Normalize to NFC first so precomposed Vietnamese chars (e.g. ệ U+1EC7)
+    # match regardless of whether the source text is NFC or NFD encoded.
+    normalized = unicodedata.normalize("NFC", address or "")
+    normalized = re.sub(r"\s+", " ", normalized).strip().lower()
     if not normalized:
         return False
     return bool(re.search(INDUSTRIAL_ZONE_PATTERN, normalized))
